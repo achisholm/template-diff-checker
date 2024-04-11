@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Template Diff Checker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            background: #EEE;
+            font: 12px sans-serif;
+        }
+
+        body {
+            padding-top: 1.8em;
+            -webkit-box-sizing: border-box;
+            -moz-box-sizing: border-box;
+            box-sizing: border-box;
+        }
+
+        html,
+        body,
+        table,
+        tbody,
+        tr,
+        td {
+            height: 100%
+        }
+
+        html {
+            min-height: 100%;
+        }
+
+        body {
+            min-height: 100%;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #controls {
+            margin-bottom: 10px;
+            display: flex
+        }
+
+        .field {
+            display: flex;
+            align-items: center;
+        }
+
+        .field label {
+            font-weight: bold;
+            display: block;
+        }
+
+        #environmentSelector label {
+            margin-right: 10px
+        }
+
+        #diffContainer {
+            flex: 1;
+            width: 100%;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            outline: 1px dashed red;
+            table-layout: fixed;
+        }
+
+        td {
+            width: 33%;
+            padding: 3px 4px;
+            border: 1px solid transparent;
+            vertical-align: top;
+            font: 1em monospace;
+            text-align: left;
+            white-space: pre-wrap;
+        }
+
+        h1 {
+            display: inline;
+            font-size: 100%;
+        }
+
+        del {
+            text-decoration: none;
+            color: #b30000;
+            background: #fadad7;
+        }
+
+        ins {
+            background: #eaf2c2;
+            color: #406619;
+            text-decoration: none;
+        }
+
+        #result {
+            white-space: pre-wrap;
+        }
+
+        #settings {
+            position: absolute;
+            top: 0;
+            left: 5px;
+            right: 5px;
+            height: 2em;
+            line-height: 2em;
+        }
+
+        #settings label {
+            margin-left: 1em;
+        }
+
+        .source {
+            position: absolute;
+            right: 1%;
+            top: .2em;
+        }
+
+        [contentEditable] {
+            background: #F9F9F9;
+            border-color: #BBB #D9D9D9 #DDD;
+            border-radius: 4px;
+            -webkit-user-modify: read-write-plaintext-only;
+            outline: none;
+        }
+
+        [contentEditable]:focus {
+            background: #FFF;
+            border-color: #6699cc;
+            box-shadow: 0 0 4px #2175c9;
+        }
+
+        .compare-button {
+            position: relative;
+        }
+
+        .compare-button__label {}
+
+        .compare-button__spinner {
+            opacity: 0;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            margin: auto;
+        }
+
+        .compare-button.is-loading .compare-button__spinner {
+            opacity: 1;
+        }
+
+        .compare-button.is-loading .compare-button__label {
+            opacity: 0;
+        }
+
+        .spinner {
+            user-select: none;
+            display: block;
+            height: 10px;
+            width: 10px;
+            border-width: 2px;
+            border-style: solid;
+            border-color: rgba(0, 0, 0, 0.2) rgba(0, 0, 0, 0.2) rgba(0, 0, 0, 0.2) transparent;
+            border-radius: 50%;
+            animation: spinner 1.2s linear infinite;
+        }
+
+        @keyframes spinner {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <nav id="controls">
+        <div id="templateSelector">
+            <div class="field">
+                <label for="templates">Select Template: </label>
+                <select id="templates"></select>
+            </div>
+        </div>
+
+        <div id="environmentSelector">
+            <div class="field">
+                <label for="env1">Environment 1: </label>
+                <select id="env1">
+                    <option value="TEMPLATES">TEMPLATES</option>
+                    <option value="DEV">DEV</option>
+                    <option value="TESTING">TESTING</option>
+                    <option value="LIVE">LIVE</option>
+                </select>
+            </div>
+            <div class="field">
+                <label for="env2">Environment 2: </label>
+                <select id="env2">
+                    <option value="TEMPLATES">TEMPLATES</option>
+                    <option value="DEV">DEV</option>
+                    <option value="TESTING">TESTING</option>
+                    <option value="LIVE" selected>LIVE</option>
+                </select>
+            </div>
+        </div>
+
+        <button class="compare-button" id="compareButton">
+            <span class="compare-button__label">Compare</span>
+            <span class="compare-button__spinner spinner"></span>
+        </button>
+
+        <!-- <progress id="progress" value="0" max="100"></progress> -->
+    </nav>
+
+    <table id="diffContainer">
+        <tr>
+            <td contenteditable="true" id="a"></td>
+            <td contenteditable="true" id="b"></td>
+            <td>
+                <pre id="result"></pre>
+            </td>
+        </tr>
+    </table>
+
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.1.0/diff.js"></script> -->
+    <script src="http://incaseofstairs.com/jsdiff/diff.js"></script>
+    <script>
+        const compareButton = document.getElementById('compareButton')
+
+        async function fetchHTML(url) {
+            try {
+                const response = await fetch(url, {
+                    credentials: 'include'
+                })
+                console.log(`Fetching ${url} resulted in ${response.status}`)
+
+                // Log headers for debugging
+                for (var pair of response.headers.entries()) {
+                    console.log(`${pair[0]}: ${pair[1]}`)
+                }
+
+                if (response.status >= 300 && response.status <= 399) {
+                    const redirectURL = response.headers.get('Location')
+                    console.log(`Redirecting to ${redirectURL}`)
+                    return fetchHTML(redirectURL)  // Recursive call to resolve redirect
+                }
+                return response.text()
+            } catch (error) {
+                console.log(`Failed to fetch ${url} with error ${error}`)
+            }
+        }
+
+        function generateURL(templateName, environment) {
+            const templateDetails = templateURLs[templateName]
+            if (!templateDetails) return null
+
+            let url
+            switch (environment) {
+                case 'TEMPLATES':
+                    url = `templates/${templateDetails.TEMPLATES}`
+                    break
+                case 'DEV':
+                    url = `dev/${templateDetails.SERVER}`
+                    break
+                case 'TESTING':
+                    url = `testing/${templateDetails.SERVER}`
+                    break
+                case 'LIVE':
+                    url = `live/${templateDetails.SERVER}`
+                    break
+                default:
+                    return null
+            }
+
+            // Normalize URL to remove or fix double slashes
+            return url.replace(/([^:]\/)\/+/g, "$1")
+        }
+
+        async function performDiff(selectedTemplate, selectedEnv1, selectedEnv2) {
+            const url1 = generateURL(selectedTemplate, selectedEnv1)
+            const url2 = generateURL(selectedTemplate, selectedEnv2)
+
+            const html1 = formatHTML(await fetchHTML(url1))
+            const html2 = formatHTML(await fetchHTML(url2))
+
+            const filteredHTML1 = filterDOM(html1)
+            const filteredHTML2 = filterDOM(html2)
+
+            const diff = JsDiff.diffChars(filteredHTML1, filteredHTML2)
+
+            const a = document.getElementById('a')
+            const b = document.getElementById('b')
+            a.textContent = filteredHTML1
+            b.textContent = filteredHTML2
+
+            renderDiff(diff)
+            compareButton.classList.remove('is-loading')
+        }
+
+        function renderDiff(diff) {
+            const result = document.getElementById('result')
+            result.innerHTML = ''
+
+            diff.forEach(part => {
+                const color = part.added ? 'green' : part.removed ? 'red' : 'grey'
+                const span = document.createElement('span')
+                span.style.color = color
+                span.appendChild(document.createTextNode(part.value))
+                result.appendChild(span)
+            })
+        }
+
+        function filterDOM(html) {
+            // Filter out parts of the DOM that you want to ignore during the diff.
+            // Replace with actual logic for filtering the HTML
+
+            return html.replace(/<!--[\s\S]*?-->/g, '') // Removing all HTML comments as an example
+        }
+
+
+        function formatHTML(html) {
+            let formatted = html;
+
+            // Replace self-closing tags with open-close pair
+            formatted = formatted.replace(/<(\w+)\s*\/>/g, '<$1></$1>');
+
+            // Remove unnecessary white spaces between tags
+            formatted = formatted.replace(/\>\s+</g, '><');
+
+            // Add new lines after closing tags
+            formatted = formatted.replace(/<\/(\w+)>/g, '</$1>\n');
+
+            // Add new lines after self-closing tags
+            formatted = formatted.replace(/<(\w+)\s*><\/\1>/g, '<$1></$1>\n');
+
+            // Prevent double line breaks
+            formatted = formatted.replace(/\n\s*\n/g, '\n');
+
+            // Put closing tag of empty script elements on the same line
+            formatted = formatted.replace(/<script[^>]*>\s*<\/script>/g, match => match.replace(/\s+/g, ' '));
+
+            return formatted;
+        }
+
+        const templateURLs = {
+            'Users > Sign-in': {
+                'TEMPLATES': 'users/sign-in.html',
+                'SERVER': 'tcl/user/sign-in'
+            },
+            'Users > Register': {
+                'TEMPLATES': 'users/register.html',
+                'SERVER': 'tcl/user/register'
+            },
+            'Orders > Basket': {
+                'TEMPLATES': 'orders/basket.html',
+                'SERVER': 'tcl/my-order'
+            },
+        }
+
+        function getTemplates() {
+            return Object.keys(templateURLs)
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const templateSelector = document.getElementById('templates')
+            const env1Selector = document.getElementById('env1')
+            const env2Selector = document.getElementById('env2')
+
+            getTemplates().forEach(template => {
+                const option = document.createElement('option')
+                option.value = template
+                option.textContent = template
+                templateSelector.appendChild(option)
+            })
+
+            compareButton.addEventListener('click', () => {
+                const selectedTemplate = templateSelector.value
+                const selectedEnv1 = env1Selector.value
+                const selectedEnv2 = env2Selector.value
+                compareButton.classList.add('is-loading')
+                performDiff(selectedTemplate, selectedEnv1, selectedEnv2)
+            })
+        })
+    </script>
+</body>
+
+</html>
